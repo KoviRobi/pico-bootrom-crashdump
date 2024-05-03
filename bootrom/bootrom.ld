@@ -1,19 +1,25 @@
 MEMORY {
-    ROM(rx) : ORIGIN = 0x00000000, LENGTH = 16K
+    BOOT2(rx) : ORIGIN = 0x10000000, LENGTH = 0x100
+    FLASH(rx) : ORIGIN = 0x10000100, LENGTH = 16K
     SRAM(rwx) : ORIGIN = 0x20000000, LENGTH = 264K
     USBRAM(rw) : ORIGIN = 0x50100400, LENGTH = 3K
 }
 
 SECTIONS {
-    . = ORIGIN(ROM);
+    .boot2 : {
+        __boot2_start__ = .;
+        KEEP (*(.boot2))
+        __boot2_end__ = .;
+    } > BOOT2
+    ASSERT(__boot2_end__ - __boot2_start__ == 256,
+        "ERROR: Pico second stage bootloader must be 256 bytes in size")
+
     .text : {
         KEEP(*(.vectors))
         *(.text*)
         KEEP(*(.rodata.keep*))
         *(.rodata*)
-        this_is_the_end_my_only_friend_the_end = .;
-        . = ALIGN(LENGTH(ROM));
-    } >ROM =0x00be
+    } >FLASH
 
     .data : {
         *(.data*)

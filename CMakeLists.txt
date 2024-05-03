@@ -114,7 +114,6 @@ target_compile_definitions(bootrom PRIVATE
         COMPRESS_TEXT
         GENERAL_SIZE_HACKS
         BOOTROM_ONLY_SIZE_HACKS
-        USE_16BIT_ROM_FUNCS
         USE_BOOTROM_GPIO
 
         # for

@@ -56,9 +56,14 @@ target_include_directories(bootrom PRIVATE bootrom usb_device_tiny ${CMAKE_CURRE
 
 add_custom_target(update_git_info DEPENDS ${GIT_INFO_H})
 
+execute_process(COMMAND git rev-parse --git-dir
+        OUTPUT_VARIABLE GIT_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+
 add_custom_command(OUTPUT ${GIT_INFO_H}
         COMMENT "Generating ${GIT_INFO_H}"
-        DEPENDS ${CMAKE_CURRENT_LIST_DIR}/.git/index
+        DEPENDS ${GIT_DIR}/index
         COMMAND ${CMAKE_COMMAND} -E echo_append " #define GIT_REV 0x" > ${GIT_INFO_H}
         COMMAND git rev-parse --short=8 HEAD >> ${GIT_INFO_H}
         )
@@ -148,5 +153,3 @@ pico_add_h32_output(bootrom)
 if (INCLUDE_TESTS)
     add_subdirectory(test)
 endif()
-
-

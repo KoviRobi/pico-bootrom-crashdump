@@ -41,9 +41,6 @@
 #define BOOT2_BASE (SRAM_END - BOOT2_SIZE_BYTES)
 
 
-static uint8_t *const boot2_load = (uint8_t *const) BOOT2_BASE;
-static ssi_hw_t *const ssi = (ssi_hw_t *) XIP_SSI_BASE;
-
 extern void debug_trampoline();
 
 // 3 cycles per count
@@ -54,48 +51,6 @@ static inline void delay(uint32_t count) {
     "bne 1b"
     : "+r" (count)
     );
-}
-
-static void _flash_boot() {
-    connect_internal_flash();
-    flash_exit_xip();
-
-    // Repeatedly poll flash read with all CPOL CPHA combinations until we
-    // get a valid 2nd stage bootloader (checksum pass)
-    int attempt;
-    for (attempt = 0; attempt < FLASH_MAX_ATTEMPTS; ++attempt) {
-        unsigned int cpol_cpha = attempt & 0x3u;
-        ssi->ssienr = 0;
-        ssi->ctrlr0 = (ssi->ctrlr0
-                       & ~(SSI_CTRLR0_SCPH_BITS | SSI_CTRLR0_SCPOL_BITS))
-                      | (cpol_cpha << SSI_CTRLR0_SCPH_LSB);
-        ssi->ssienr = 1;
-
-        flash_read_data(BOOT2_FLASH_OFFS, boot2_load, BOOT2_SIZE_BYTES);
-        uint32_t sum = crc32_small(boot2_load, BOOT2_SIZE_BYTES - 4, 0xffffffff);
-        if (sum == *(uint32_t *) (boot2_load + BOOT2_SIZE_BYTES - 4))
-            break;
-    }
-
-    if (attempt == FLASH_MAX_ATTEMPTS)
-        return;
-
-    // Take this opportunity to flush the flash cache, as the debugger may have
-    // written fresh code in behind it.
-    flash_flush_cache();
-
-    // Enter boot2 (thumb bit set). Exit pointer is passed in lr -- we pass
-    // null, boot2 provides default for this case.  
-    // Addition performed inside asm because GCC *really* wants to store another constant
-    uint32_t boot2_entry = (uintptr_t) boot2_load;
-    const uint32_t boot2_exit = 0;
-    asm volatile (
-    "add %0, #1\n"
-    "mov lr, %1\n"
-    "bx %0\n"
-    : "+r" (boot2_entry) : "l" (boot2_exit) :
-    );
-    __builtin_unreachable();
 }
 
 // USB bootloader requires clk_sys and clk_usb at 48 MHz. For this to work,
@@ -224,32 +179,6 @@ void __attribute__((noreturn)) reset_usb_boot(uint32_t _usb_activity_gpio_pin_ma
 }
 
 int main() {
-    const uint32_t rst_mask =
-            RESETS_RESET_IO_QSPI_BITS |
-            RESETS_RESET_PADS_QSPI_BITS |
-            RESETS_RESET_TIMER_BITS;
-    reset_unreset_block_wait_noinline(rst_mask);
-
-    // Workaround for behaviour of TXB0108 bidirectional level shifters on
-    // FPGA platform (JIRA PRJMU-726), not used on ASIC
-    if (running_on_fpga()) {
-        *(io_rw_32 *) (IO_QSPI_BASE + 0xc) = 5; // GPIO_FUNC_PROC
-        sio_hw->gpio_hi_out = 1u << 1;         // Level high on CS pin
-        sio_hw->gpio_hi_oe = 1u << 1;          // Output enable
-        sio_hw->gpio_hi_oe = 0;                // Output disable
-    }
-
-    // Check CSn strap: delay for pullups to charge trace, then take a majority vote.
-    delay(100 * ROSC_MHZ_MAX / 3);
-    uint32_t sum = 0;
-    for (int i = 0; i < 9; ++i) {
-        delay(1 * ROSC_MHZ_MAX / 3);
-        sum += (sio_hw->gpio_hi_in >> 1) & 1u;
-    }
-
-    if (sum >= 5)
-        _flash_boot();
-
     // note this never returns (and is marked as such)
     _usb_boot(0, 0);
 }

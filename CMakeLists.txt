@@ -7,7 +7,7 @@ include(pico_sdk/pico_sdk_init.cmake)
 project(pico_bootrom)
 
 if (NOT INCLUDE_TESTS)
-    set(PICO_BARE_METAL 1)
+    # set(PICO_BARE_METAL 1)
 else()
     # SDK versions conflict with code to be tested
     set(SKIP_PICO_BIT_OPS 1)
@@ -135,6 +135,7 @@ target_link_libraries(bootrom PRIVATE
         hardware_sync
         boot_uf2_headers
         boot_picoboot_headers
+        bs2_default_library
         )
 
 function(pico_add_h32_output TARGET)

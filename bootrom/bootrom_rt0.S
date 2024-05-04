@@ -156,37 +156,12 @@ copyright:
 .thumb_func
 _start:
 
-// Check if this is core 0, and go to holding pen if not
-check_core:
-    // NOTE: We DO NOT use any stack prior to possible watchdog entry (this includes NMI vector handler)
-    ldr r0, =SIO_BASE
-    ldr r1, [r0, #SIO_CPUID_OFFSET]
-    cmp r1, #0
-    bne wait_for_vector
-
 // Make sure all the control registers we are about to access are being clocked.
 // On a cold boot everything will be set up by the power-on state machine,
 // but the clock setup may be dirty on a warm boot.
 
 // note that the NMI handler does exactly what we want (enable_clocks) and also disables NMI
     bl _nmi
-
-// If the rescue flag is set in PoR block, we should halt immediately.
-// (presumably some lethal code is in flash which would stop the debugger from
-// communicating with the processors).
-check_rescue:
-    ldr r1, =(VREG_AND_CHIP_RESET_BASE + VREG_AND_CHIP_RESET_CHIP_RESET_OFFSET)
-    ldr r2, [r1]
-#if VREG_AND_CHIP_RESET_CHIP_RESET_PSM_RESTART_FLAG_BITS != 0x01000000
-#error
-#endif
-    lsr r3, r2, #25
-    bcc 1f
-// Acknowledge and halt (note we write all bits, but VREG_AND_CHIP_RESET_CHIP_RESET_PSM_RESTART_FLAG_BITS
-// is the only WC bit
-    str r2, [r1]
-    b _dead
-1:
 
 disable_adc_ie:
 #if RESETS_RESET_PADS_BANK0_BITS != (0x80 << 1)
@@ -203,121 +178,9 @@ disable_adc_ie:
     str r2, [r1, #PADS_BANK0_GPIO28_OFFSET]
     str r2, [r1, #PADS_BANK0_GPIO29_OFFSET]
 
-// Check watchdog scratch for direct-boot magic numbers
-// This is useful in factory test for running ARM code without accessing DAP.
-// Probably also useful for imaginative software engineers
-// - Scratch 4:  0xb007c0d3
-// - Scratch 5:  Entry point ^ -0xb007c0d3
-// - Scratch 6:  Stack pointer
-// - Scratch 7:  Entry point
-check_wdog:
-    ldr r7, =(WATCHDOG_BASE + WATCHDOG_SCRATCH4_OFFSET)
-    ldr r6, =(0xb007c0d3)
-    ldmia r7!, {r0, r1, r2, r3}
-    cmp r0, r6
-    bne 1f
-    eor r1, r3
-    add r0, r1
-    bne 1f
-    // Clear magic number for next time (note -16 because of r7! above)
-    sub r7, #16
-    str r0, [r7]
-    // Magic numbers look good, so jump straight into the code that has been prepared for us
-    msr msp, r2
-    // Note if this return, we continue with regular boot below
-    blx r3
-    // Proceed to main flash boot sequence
-1:
     // main does not return
     bl main
     // b _dead
-
-// ----------------------------------------------------------------------------
-// Hold/launch code for Core 1
-// ----------------------------------------------------------------------------
-// Core 0 will bring core 1 up once it has gone through the sequence of setting
-// up flash etc.
-//
-
-send_and_then_again:
-    // in case of multiple core 1 resets, we can keep pushing and fill the FIFO
-    // we should wait for an event if the FIFO is full to avoid busy wait
-    wfe
-// takes r0 = word to send, r4 = SIOB_BASE, r5 link register
-send_and_then:
-    ldr r1, [r4, #SIO_FIFO_ST_OFFSET]
-    lsr r1, #SIO_FIFO_ST_RDY_LSB + 1
-    bcc send_and_then_again
-    str r0, [r4, #SIO_FIFO_WR_OFFSET]
-    sev
-    add r6, r5, #1
-    bx  r6
-
-#define M0_BASE (PPB_BASE + M0PLUS_CPUID_OFFSET)
-
-wait_for_vector:
-    ldr r4, =SIO_BASE
-    ldr r7, =M0_BASE
-    // Enable SCR.SLEEPDEEP before WFE -- this allows NVIC to be fully gated during sleep
-    mov r1, #M0PLUS_SCR_SLEEPDEEP_BITS
-    str r1, [r7, #(M0PLUS_SCR_OFFSET - M0PLUS_CPUID_OFFSET)]
-    // note core_0_handshake_loop is the intended next instruction, but the read is harmless
-    // as we're about to drain, so don't waste an instruction branching
-1:
-    ldr r1, [r4, #SIO_FIFO_RD_OFFSET]
-core_0_handshake_loop:
-    // drain the FIFO before sending 0
-    ldr r1, [r4, #SIO_FIFO_ST_OFFSET]
-    lsr r1, #SIO_FIFO_ST_VLD_LSB + 1
-    bcs 1b
-
-    // ...and_then = receive_and_check_zero (which jmps to core_0_handshake_loop on 0)
-    adr r5, receive_and_check_zero
-    // send 0
-    mov r0, #0
-    bl send_and_then
-    // check for cmd 1
-    cmp r0, #1
-    bne core_0_handshake_loop
-    // ack and receive VTOR
-    bl send_and_then
-    str r0, [r7, #(M0PLUS_VTOR_OFFSET - M0PLUS_CPUID_OFFSET)]
-    // ack and receive SP
-    bl send_and_then
-    // initialize
-    msr msp, r0
-    bl send_and_then
-    adr r5, core1_launch
-    // receive IP (0 sends us back into handshake loop)
-    bl send_and_then
-//    nop // .. for alignment
-core1_launch:
-    // Disable SLEEPDEEP before exiting, as it affects wake latency
-    mov r1, #0
-    str r1, [r7, #(M0PLUS_SCR_OFFSET - M0PLUS_CPUID_OFFSET)]
-    blx r0
-
-// Low power hang on return. Reset the core if you want to provide another entry point
-// (There is no need to return though)
-//
-// alternatively you could return directly to wait_for_vector (available in the function table)
-// if you know core 1 is still in a good state
-    b _dead
-
-.align 2
-// takes r4 = SIOB_BASE
-// returns r0 = word received
-receive_and_check_zero:
-    wfe
-    ldr r0, [r4, #SIO_FIFO_ST_OFFSET]
-    lsr r0, #SIO_FIFO_ST_VLD_LSB + 1
-    bcc receive_and_check_zero
-
-    ldr r0, [r4, #SIO_FIFO_RD_OFFSET]
-    cmp r0, #0
-    // if we received 0, we reset back to main loop
-    beq core_0_handshake_loop
-    bx  lr
 
 .global reset_block_noinline
 .type reset_block_noinline,%function

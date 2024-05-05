@@ -381,11 +381,6 @@ __rom_function_static_impl(void, _picoboot_cmd_packet)(struct usb_endpoint *ep) 
 #endif
 
 static void _usb_boot_on_configure(struct usb_device *device, bool configured) {
-#if !defined(USB_BOOT_EXPANDED_RUNTIME) || defined(NO_FLASH) // can't do this on a flash based usb_boot_test build for obvious reasons!
-    // kill any in process flash which might be stuck - this will leave flash in bad state
-    usb_warn("FLASH ABORT\n");
-    flash_abort();
-#endif
     msc_on_configure(device, configured);
 #ifdef USE_PICOBOOT
     if (configured) _picoboot_reset();

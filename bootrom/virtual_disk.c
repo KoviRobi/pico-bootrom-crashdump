@@ -52,6 +52,9 @@ static_assert(VOLUME_SIZE >= 16 * 1024 * 1024, "volume too small for fat16");
 #define MAX_RAM_UF2_BLOCKS 1280
 static_assert(MAX_RAM_UF2_BLOCKS >= ((SRAM_END - SRAM_BASE) + (XIP_SRAM_END - XIP_SRAM_BASE)) / 256, "");
 
+extern __noinline __attribute__((noreturn)) void reset_usb_boot(
+    uint32_t _usb_activity_gpio_pin_mask, uint32_t disable_interface_mask);
+
 static __attribute__((aligned(4))) uint32_t uf2_valid_ram_blocks[(MAX_RAM_UF2_BLOCKS + 31) / 32];
 
 enum partition_type {
@@ -169,6 +172,7 @@ static void _write_uf2_page_complete(struct async_task *task) {
 
 // return true for async
 static bool _write_uf2_page() {
+    reset_usb_boot(usb_activity_gpio_pin_mask, 0);
     // If we need to write a page (i.e. it hasn't been written before, then we queue a task to do that asynchronously
     //
     // Note that in an ideal world, given that we aren't synchronizing with the task in any way from here on,

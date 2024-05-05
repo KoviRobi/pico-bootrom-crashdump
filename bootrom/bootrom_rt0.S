@@ -42,38 +42,6 @@ __vectors:
 .word _nmi      // NMI
 .word _dead     // HardFault
 
-.global _magic
-_magic:
-# magic
-.byte 'M', 'u'
-# compatibility version (change if function table is incompatible, or functions are backwards incompatible)
-.byte 1
-# ROM version
-.byte 3
-
-.global _well_known
-_well_known:
-.hword function_table
-.hword data_table
-.hword table_lookup + 1
-.hword 0 // pad
-
-.global table_lookup
-.type table_lookup,%function
-.thumb_func
-table_lookup:
-    mov r3, #0
-    ldrh r2, [r0]
-    cmp r2, r3
-    beq 1f
-    ldrh r3, [r0, #2]
-    add r0, #4
-    cmp r1, r2
-    bne table_lookup
-1:
-    mov r0, r3
-    bx lr
-
 .global _dead
 .type _dead,%function
 .thumb_func
@@ -137,86 +105,13 @@ _noop:
 software_git_revision:
 .word GIT_REV
 
+.org 0x54
 .global __irq5_vector
 __irq5_vector:
 .word isr_irq5
 
 copyright:
 .string "(C) 2020 Raspberry Pi Trading Ltd"
-
-
-function_table:
-# function table
-#ifdef USE_POPCOUNT32
-.byte 'P, '3'
-.hword popcount32 + 1
-#endif
-#ifdef USE_REVERSE32
-.byte 'R', '3'
-.hword reverse32 + 1
-#endif
-#ifdef USE_CLZ32
-.byte 'L', '3'
-.hword clz32 + 1
-#endif
-#ifdef USE_CTZ32
-.byte 'T', '3'
-.hword ctz32 + 1
-#endif
-.byte 'M', 'S'
-.hword __memset + 1
-.byte 'S', '4'
-.hword __memset_4 + 1
-.byte 'M', 'C'
-.hword __memcpy + 1
-.byte 'C', '4'
-.hword __memcpy_44 + 1
-.byte 'U', 'B'
-.hword reset_usb_boot + 1
-.byte 'D', 'T'
-.hword debug_trampoline + 1
-.byte 'D', 'E'
-.hword debug_trampoline_end + 1
-.byte 'W', 'V'
-.hword wait_for_vector + 1
-.byte 'I', 'F'
-.hword connect_internal_flash + 1
-.byte 'E', 'X'
-.hword flash_exit_xip + 1
-.byte 'R', 'E'
-.hword flash_range_erase + 1
-.byte 'R', 'P'
-.hword flash_range_program + 1
-.byte 'F', 'C'
-.hword flash_flush_cache + 1
-.byte 'C', 'X'
-.hword flash_enter_cmd_xip + 1
-# end of function table marker
-.hword 0
-
-.global data_table
-data_table:
-    .byte 'G', 'R'
-    .hword software_git_revision
-    .byte 'C', 'R'
-    .hword copyright
-    .byte 'S', 'F'
-    .hword soft_float_table
-    .byte 'S', 'D'
-    .hword soft_double_table
-    .byte 'F', 'Z'
-    .hword soft_float_table_size
-    // expose library start and end to facilitate users copying into RAM
-    .byte 'F, 'S'
-    .hword mufp_lib_start
-    .byte 'F, 'E'
-    .hword mufp_lib_end
-    // expose library start and end to facilitate users copying into RAM
-    .byte 'D, 'S'
-    .hword mufp_lib_double_start
-    .byte 'D, 'E'
-    .hword mufp_lib_double_end
-    .hword 0
 
 // ----------------------------------------------------------------------------
 // Entry point for both cores

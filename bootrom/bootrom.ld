@@ -15,6 +15,11 @@ SECTIONS {
         "ERROR: Pico second stage bootloader must be 256 bytes in size")
 
     .text : {
+        __reset_start = .;
+        KEEP (*(.reset))
+        . = ALIGN(256);
+        __reset_end = .;
+        ASSERT(__reset_end - __reset_start == 256, "ERROR: reset section should only be 256 bytes");
         KEEP(*(.vectors))
         *(.text*)
         KEEP(*(.rodata.keep*))

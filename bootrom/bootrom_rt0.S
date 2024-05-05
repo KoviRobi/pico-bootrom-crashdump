@@ -31,6 +31,40 @@
 #include "git_info.h"
 
 .cpu cortex-m0
+
+.section .reset, "ax"
+
+// This is the beginning of the image, which is entered from stage2 or bootrom USB MSD watchdog reboot
+
+// note if we are NO_FLASH then start: below is currently identical anyway, so save 4 bytes
+#if !PICO_NO_FLASH
+    // We simply install our own vector table and redirect through it
+    ldr r0, =__vectors
+    b __vector_entry
+#endif
+
+// ELF entry point generally called when we load an ELF via debugger
+.type _entry_point,%function
+.thumb_func
+.global _entry_point
+_entry_point:
+
+#if PICO_NO_FLASH
+    // non flash
+    ldr r0, =__vectors
+#else
+    // todo clear watchdog?
+    // When using flash, we install and use the ROM vector table to go thru regular bootrom/stage2 flash sequence
+    movs r0, #0
+#endif
+
+__vector_entry:
+    ldr r1, =(PPB_BASE + M0PLUS_CPUID_OFFSET)
+    str r0, [r1, #8] // Set VTOR
+    ldmia r0!, {r1, r2}
+    msr msp, r1
+    bx r2
+
 .thumb
 .section .vectors
 .balign 2

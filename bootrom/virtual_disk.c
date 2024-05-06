@@ -25,6 +25,23 @@ static_assert(CLUSTER_SIZE == SECTOR_SIZE << CLUSTER_SHIFT, "");
 
 #define CLUSTER_COUNT (VOLUME_SIZE / CLUSTER_SIZE)
 
+#define FIRST_CLUSTER 2
+#define CLUS_INDEX 2
+#ifdef USE_INFO_UF2
+#define CLUS_INFO  3
+#define CLUS_CRASH_START 4
+#else
+#define CLUS_CRASH_START 3
+#endif
+
+// See format below for "xxd" function
+#define XXD_CHARS_PER_BYTE 4
+#define BYTES_DUMPED_PER_SECTOR  (SECTOR_SIZE / XXD_CHARS_PER_BYTE)
+#define BYTES_DUMPED_PER_CLUSTER (CLUSTER_SIZE / XXD_CHARS_PER_BYTE)
+#define MEM_SIZE (SRAM_END - SRAM_BASE)
+#define CLUS_CRASH_LAST (CLUS_CRASH_START + (MEM_SIZE / BYTES_DUMPED_PER_CLUSTER))
+#define CRASH_LEN (XXD_CHARS_PER_BYTE * MEM_SIZE)
+
 static_assert(CLUSTER_COUNT <= 65526, "FAT16 limit");
 
 #ifdef NO_PARTITION_TABLE
@@ -253,6 +270,56 @@ void vd_reset() {
     _uf2_info.num_blocks = 0; // marker that uf2_info is invalid
 }
 
+void hex(uint8_t *buf, const uint32_t word, const uint8_t nibbles) {
+    for (uint8_t hexit = (8 - nibbles); hexit < 8; ++hexit) {
+        const uint8_t offset = hexit - (8 - nibbles);
+        const uint8_t nibble = (word >> ((7 - hexit) * 4)) & 0xF;
+        if (nibble < 10) {
+            buf[offset] = '0' + nibble;
+        } else {
+            buf[offset] = 'a' + nibble - 10;
+        }
+    }
+}
+
+/// Format is
+///
+///      addr   0 1  2 3  4 5  6 7  8 9  a b  c d  e f     ascii dump   newline
+///      24000 0000 0000 0000 0000 0000 0000 0000 0000  ................\n
+///      ^------------------------ 64 characters -----------------------^
+///
+/// which adds up to 4 characters per byte (64 characters for 16 bytes).
+///
+/// To  make it easier, we hexdump SECTOR_SIZE==512 *output characters* at a
+/// time -- this is exactly 8 lines so we don't have to worry about partial
+/// lines.
+void xxd(uint8_t *const buf, const uint8_t *const mem) {
+    for (uint8_t line = 0; line < 8; ++line) {
+        const size_t buf_offset = 64 * line;
+        const size_t mem_offset = 16 * line;
+        hex(&buf[buf_offset + 0x00], (uintptr_t)&mem[mem_offset], 5);
+        buf[buf_offset + 0x05] = ' ';
+        for (uint8_t hword = 0; hword < 8; ++hword) {
+            const size_t buf_offset_h = buf_offset + 5 * hword;
+            const size_t mem_offset_h = mem_offset + 2 * hword;
+            hex(&buf[buf_offset_h + 0x06], mem[mem_offset_h + 0], 2);
+            hex(&buf[buf_offset_h + 0x08], mem[mem_offset_h + 1], 2);
+            buf[buf_offset_h + 0x0a] = ' ';
+        } // 5 chars per hword, so up to 0x05 + 5*8 = 45 = 0x2d
+        buf[buf_offset + 0x2e] = ' ';
+        for (uint8_t b = 0; b < 16; ++b) {
+            const size_t buf_offset_b = buf_offset + b;
+            uint8_t c = mem[mem_offset + b];
+            if (' ' <= c && c <= '~') {
+                buf[buf_offset_b + 0x2f] = c;
+            } else {
+                buf[buf_offset_b + 0x2f] = '.';
+            }
+        }
+        buf[buf_offset + 0x3f] = '\n';
+    }
+}
+
 // note caller must pass SECTOR_SIZE buffer
 void init_dir_entry(struct dir_entry *entry, const char *fn, uint cluster, uint len) {
     entry->creation_time_frac = RASPBERRY_PI_TIME_FRAC;
@@ -310,18 +377,33 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
         memcpy(buf + BOOT_OFFSET_SERIAL_NUMBER, &sn, 4);
     } else {
         lba--;
-        if (lba < SECTORS_PER_FAT * FAT_COUNT) {
+        if (lba < SECTORS_PER_FAT * FAT_COUNT) { // FAT region
             // mirror
             while (lba >= SECTORS_PER_FAT) lba -= SECTORS_PER_FAT;
+            size_t index = 0;
+            uint16_t *p = (uint16_t *) buf;
             if (!lba) {
-                uint16_t *p = (uint16_t *) buf;
-                p[0] = 0xff00u | MEDIA_TYPE;
-                p[1] = 0xffff;
-                p[2] = 0xffff; // cluster2 is index.htm
+                p[index++] = 0xff00u | MEDIA_TYPE;
+                p[index++] = 0xffff;
+                p[index++] = 0xffff; // index.htm
 #ifdef USE_INFO_UF2
-                p[3] = 0xffff; // cluster3 is info_uf2.txt
+                p[index++] = 0xffff;  // info_uf2.txt
 #endif
             }
+
+            const size_t min_index = lba * (SECTOR_SIZE / 2);
+            const size_t max_index = min_index + SECTOR_SIZE / 2 - 1;
+            for (size_t clus_crash = MAX(min_index, CLUS_CRASH_START);
+                    clus_crash <= MIN(max_index, CLUS_CRASH_LAST);
+                    ++clus_crash) {
+                // crashdump.xxd -- point to next cluster
+                p[index++] = clus_crash + 1;
+            }
+            // crashdmp.xxd -- patch up last cluster
+            if (index-1 == CLUS_CRASH_LAST) {
+              p[index-1] = 0xffff;
+            }
+
         } else {
             lba -= SECTORS_PER_FAT * FAT_COUNT;
             if (lba < ROOT_DIRECTORY_SECTORS) {
@@ -331,17 +413,18 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
                     struct dir_entry *entries = (struct dir_entry *) buf;
                     memcpy(entries[0].name, (boot_sector + BOOT_OFFSET_LABEL), 11);
                     entries[0].attr = ATTR_VOLUME_LABEL | ATTR_ARCHIVE;
-                    init_dir_entry(++entries, "INDEX   HTM", 2, welcome_html_len);
+                    init_dir_entry(++entries, "INDEX   HTM", CLUS_INDEX, welcome_html_len);
 #ifdef USE_INFO_UF2
-                    init_dir_entry(++entries, "INFO_UF2TXT", 3, info_uf2_txt_len);
+                    init_dir_entry(++entries, "INFO_UF2TXT", CLUS_INFO, info_uf2_txt_len);
 #endif
+                    init_dir_entry(++entries, "CRASHDMPXXD", CLUS_CRASH_START, CRASH_LEN);
                 }
             } else {
                 lba -= ROOT_DIRECTORY_SECTORS;
-                uint cluster = lba >> CLUSTER_SHIFT;
-                uint cluster_offset = lba - (cluster << CLUSTER_SHIFT);
+                uint cluster = (lba >> CLUSTER_SHIFT) + FIRST_CLUSTER;
+                uint cluster_offset = lba & ((1u << CLUSTER_SHIFT) - 1);
                 if (!cluster_offset) {
-                    if (cluster == 0) {
+                    if (cluster == CLUS_INDEX) {
 #ifndef COMPRESS_TEXT
                         memcpy(buf, welcome_html, welcome_html_len);
 #else
@@ -351,12 +434,21 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
 #endif
                     }
 #ifdef USE_INFO_UF2
-                    else if (cluster == 1) {
+                    else if (cluster == CLUS_INFO) {
                         // spec suggests we have this as raw text in the binary, although it doesn't much matter if no CURRENT.UF2 file
                         // note that this text doesn't compress anyway, so do this raw anyway
                         memcpy(buf, info_uf2_txt, info_uf2_txt_len);
                     }
 #endif
+                }
+
+                // This can be in cluster offset 0 (!cluster_offset) and
+                // higher, hence not in the above "if" conditional
+                if (CLUS_CRASH_START <= cluster && cluster <= CLUS_CRASH_LAST) {
+                    xxd(buf,
+                            (uint8_t *)SRAM_BASE
+                            + (cluster - CLUS_CRASH_START) * BYTES_DUMPED_PER_CLUSTER
+                            + cluster_offset * BYTES_DUMPED_PER_SECTOR);
                 }
             }
         }

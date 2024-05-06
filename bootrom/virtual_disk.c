@@ -25,19 +25,22 @@ static_assert(CLUSTER_SIZE == SECTOR_SIZE << CLUSTER_SHIFT, "");
 
 #define CLUSTER_COUNT (VOLUME_SIZE / CLUSTER_SIZE)
 
+#define FIRST_CLUSTER 2
 #define CLUS_INDEX 2
 #ifdef USE_INFO_UF2
 #define CLUS_INFO  3
-#define CLUS_CRASH 4
+#define CLUS_CRASH_START 4
 #else
-#define CLUS_CRASH 3
+#define CLUS_CRASH_START 3
 #endif
 
-// Currently we dump one cluster's worth of ASCII data
-#define CRASH_LEN CLUSTER_SIZE
 // See format below for "xxd" function
 #define XXD_CHARS_PER_BYTE 4
-#define BYTES_DUMPED_PER_SECTOR (SECTOR_SIZE / XXD_CHARS_PER_BYTE)
+#define BYTES_DUMPED_PER_SECTOR  (SECTOR_SIZE / XXD_CHARS_PER_BYTE)
+#define BYTES_DUMPED_PER_CLUSTER (CLUSTER_SIZE / XXD_CHARS_PER_BYTE)
+#define MEM_SIZE (SRAM_END - SRAM_BASE)
+#define CLUS_CRASH_LAST (CLUS_CRASH_START + (MEM_SIZE / BYTES_DUMPED_PER_CLUSTER))
+#define CRASH_LEN (XXD_CHARS_PER_BYTE * MEM_SIZE)
 
 static_assert(CLUSTER_COUNT <= 65526, "FAT16 limit");
 
@@ -377,16 +380,30 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
         if (lba < SECTORS_PER_FAT * FAT_COUNT) { // FAT region
             // mirror
             while (lba >= SECTORS_PER_FAT) lba -= SECTORS_PER_FAT;
+            size_t index = 0;
+            uint16_t *p = (uint16_t *) buf;
             if (!lba) {
-                uint16_t *p = (uint16_t *) buf;
-                p[0] = 0xff00u | MEDIA_TYPE;
-                p[1] = 0xffff;
-                p[CLUS_INDEX] = 0xffff; // index.htm
+                p[index++] = 0xff00u | MEDIA_TYPE;
+                p[index++] = 0xffff;
+                p[index++] = 0xffff; // index.htm
 #ifdef USE_INFO_UF2
-                p[CLUS_INFO] = 0xffff;  // info_uf2.txt
+                p[index++] = 0xffff;  // info_uf2.txt
 #endif
-                p[CLUS_CRASH] = 0xffff; // crashdmp.xxd
             }
+
+            const size_t min_index = lba * (SECTOR_SIZE / 2);
+            const size_t max_index = min_index + SECTOR_SIZE / 2 - 1;
+            for (size_t clus_crash = MAX(min_index, CLUS_CRASH_START);
+                    clus_crash <= MIN(max_index, CLUS_CRASH_LAST);
+                    ++clus_crash) {
+                // crashdump.xxd -- point to next cluster
+                p[index++] = clus_crash + 1;
+            }
+            // crashdmp.xxd -- patch up last cluster
+            if (index-1 == CLUS_CRASH_LAST) {
+              p[index-1] = 0xffff;
+            }
+
         } else {
             lba -= SECTORS_PER_FAT * FAT_COUNT;
             if (lba < ROOT_DIRECTORY_SECTORS) {
@@ -400,14 +417,14 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
 #ifdef USE_INFO_UF2
                     init_dir_entry(++entries, "INFO_UF2TXT", CLUS_INFO, info_uf2_txt_len);
 #endif
-                    init_dir_entry(++entries, "CRASHDMPXXD", CLUS_CRASH, CRASH_LEN);
+                    init_dir_entry(++entries, "CRASHDMPXXD", CLUS_CRASH_START, CRASH_LEN);
                 }
             } else {
                 lba -= ROOT_DIRECTORY_SECTORS;
-                uint cluster = lba >> CLUSTER_SHIFT;
-                uint cluster_offset = lba - (cluster << CLUSTER_SHIFT);
+                uint cluster = (lba >> CLUSTER_SHIFT) + FIRST_CLUSTER;
+                uint cluster_offset = lba & ((1u << CLUSTER_SHIFT) - 1);
                 if (!cluster_offset) {
-                    if (cluster == CLUS_INDEX - 2) {
+                    if (cluster == CLUS_INDEX) {
 #ifndef COMPRESS_TEXT
                         memcpy(buf, welcome_html, welcome_html_len);
 #else
@@ -417,7 +434,7 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
 #endif
                     }
 #ifdef USE_INFO_UF2
-                    else if (cluster == CLUS_INFO - 2) {
+                    else if (cluster == CLUS_INFO) {
                         // spec suggests we have this as raw text in the binary, although it doesn't much matter if no CURRENT.UF2 file
                         // note that this text doesn't compress anyway, so do this raw anyway
                         memcpy(buf, info_uf2_txt, info_uf2_txt_len);
@@ -427,8 +444,11 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
 
                 // This can be in cluster offset 0 (!cluster_offset) and
                 // higher, hence not in the above "if" conditional
-                if (cluster == CLUS_CRASH - 2) {
-                    xxd(buf, (uint8_t *)SRAM_BASE + cluster_offset * BYTES_DUMPED_PER_SECTOR);
+                if (CLUS_CRASH_START <= cluster && cluster <= CLUS_CRASH_LAST) {
+                    xxd(buf,
+                            (uint8_t *)SRAM_BASE
+                            + (cluster - CLUS_CRASH_START) * BYTES_DUMPED_PER_CLUSTER
+                            + cluster_offset * BYTES_DUMPED_PER_SECTOR);
                 }
             }
         }

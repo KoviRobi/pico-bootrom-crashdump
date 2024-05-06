@@ -212,7 +212,7 @@ static void _msc_on_sector_stream_packet_complete(__removed_for_space(struct usb
     _msc_state.csw.residue -= 64;
 }
 
-__rom_function_static_impl(bool, _msc_on_sector_stream_chunk)(__unused uint32_t chunk_len__comma_removed_for_space(
+__rom_function_static_impl(bool, _msc_on_sector_stream_chunk)(__unused uint32_t chunk_len __comma_removed_for_space(
         struct usb_stream_transfer *transfer)) {
     assert(transfer == &_msc_sector_transfer.stream);
     assert(chunk_len == SECTOR_SIZE);

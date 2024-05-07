@@ -13,6 +13,10 @@
         picotool
         inetutils # For telnet
         elf2uf2-rs
+
+        poke
+        fq
+        python3.pkgs.pyelftools
       ];
     };
   };

@@ -44,8 +44,6 @@ add_executable(bootrom
         bootrom/usb_boot_device.c
         bootrom/virtual_disk.c
         bootrom/async_task.c
-        bootrom/mufplib.S
-        bootrom/mufplib-double.S
         usb_device_tiny/runtime.c
         usb_device_tiny/usb_device.c
         usb_device_tiny/usb_msc.c

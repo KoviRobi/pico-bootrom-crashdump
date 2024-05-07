@@ -136,7 +136,8 @@ static __noinline __attribute__((noreturn)) void _usb_boot(uint32_t _usb_activit
     hw_set_bits(&watchdog_hw->tick, WATCHDOG_TICK_ENABLE_BITS);
 
     // turn off XIP cache since we want to use it as RAM in case the USER wants to use it for a RAM only binary
-    hw_clear_bits(&xip_ctrl_hw->ctrl, XIP_CTRL_EN_BITS);
+    // TODO: This is why it's so much slower than ROM
+    // hw_clear_bits(&xip_ctrl_hw->ctrl, XIP_CTRL_EN_BITS);
     // Don't clear out RAM - leave it to binary download to clear anything it needs cleared; anything BSS will be done by crt0.S on reset anyway
 
     // this is where the BSS is so clear it

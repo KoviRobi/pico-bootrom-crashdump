@@ -377,7 +377,6 @@ static void _msc_reset(void) {
     memset0(&_msc_state, sizeof(_msc_state));
     _msc_state.request_sense.code = 0x70;
     _msc_state.request_sense.additonal_sense_len = 0xa;
-    vd_reset();
     usb_soft_reset_endpoint(&msc_in);
     usb_soft_reset_endpoint(&msc_out);
 }

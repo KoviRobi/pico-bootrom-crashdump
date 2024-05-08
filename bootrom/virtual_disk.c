@@ -71,8 +71,6 @@ static_assert(VOLUME_SIZE >= 16 * 1024 * 1024, "volume too small for fat16");
 #define MAX_RAM_UF2_BLOCKS 1280
 static_assert(MAX_RAM_UF2_BLOCKS >= ((SRAM_END - SRAM_BASE) + (XIP_SRAM_END - XIP_SRAM_BASE)) / 256, "");
 
-static __attribute__((aligned(4))) uint32_t uf2_valid_ram_blocks[(MAX_RAM_UF2_BLOCKS + 31) / 32];
-
 enum partition_type {
     PT_FAT12 = 1,
     PT_FAT16 = 4,
@@ -161,42 +159,9 @@ struct dir_entry {
 
 static_assert(sizeof(struct dir_entry) == 32, "");
 
-static struct uf2_info {
-    uint32_t *valid_blocks;
-    uint32_t max_valid_blocks;
-    uint32_t *cleared_pages;
-    uint32_t max_cleared_pages;
-    uint32_t num_blocks;
-    uint32_t token;
-    uint32_t valid_block_count;
-    uint32_t lowest_addr;
-    uint32_t block_no;
-    struct async_task next_task;
-    bool ram;
-} _uf2_info;
-
 // --- start non IRQ code ---
 
-static void _write_uf2_page_complete(struct async_task *task) {
-    if (task->token == _uf2_info.token) {
-        if (!task->result && _uf2_info.valid_block_count == _uf2_info.num_blocks) {
-            safe_reboot(_uf2_info.ram ? _uf2_info.lowest_addr : 0, SRAM_END, 1000); //300); // reboot in 300 ms
-        }
-    }
-    vd_async_complete(task->token, task->result);
-}
-
-// return true for async
-static bool _write_uf2_page() {
-    reset_usb_boot(usb_activity_gpio_pin_mask, 0);
-}
-
 void vd_init() {
-}
-
-void vd_reset() {
-    usb_debug("Resetting virtual disk\n");
-    _uf2_info.num_blocks = 0; // marker that uf2_info is invalid
 }
 
 void hex(uint8_t *buf, const uint32_t word, const uint8_t nibbles) {
@@ -392,76 +357,6 @@ static_assert(!(FLASH_CLEARED_PAGES_BASE & 0x3), "");
 static_assert(FLASH_CLEARED_PAGES_BASE + (FLASH_MAX_CLEARED_PAGES / 32 - FLASH_VALID_BLOCKS_BASE <= FLASH_BITMAPS_SIZE),
               "");
 
-static void _clear_bitset(uint32_t *mask, uint32_t count) {
-    memset0(mask, count / 8);
-}
-
-static bool _update_current_uf2_info(struct uf2_block *uf2, uint32_t token) {
-    bool ram = is_address_ram(uf2->target_addr) && is_address_ram(uf2->target_addr + (FLASH_PAGE_MASK));
-    bool flash = is_address_flash(uf2->target_addr) && is_address_flash(uf2->target_addr + (FLASH_PAGE_MASK));
-    if (!(uf2->num_blocks && (ram || flash)) || (flash && (uf2->target_addr & (FLASH_PAGE_MASK)))) {
-        uf2_debug("Resetting active UF2 transfer because received garbage\n");
-    } else if (!virtual_disk_queue.disable) {
-        // note (test abive) if virtual disk queue is disabled (and note since we're in IRQ that cannot change whilst we are executing),
-        // then we don't want to do any of this even if the task will be ignored later (doing this would modify our state)
-        uint8_t type = AT_WRITE; // we always write
-        if (_uf2_info.num_blocks != uf2->num_blocks) {
-            // todo we may be able to skip some of these checks and let the task handle it (it will ignore garbage addresses for example)
-            uf2_debug("Resetting active UF2 transfer because have new binary size %d->%d\n", (int) _uf2_info.num_blocks,
-                      (int) uf2->num_blocks);
-            memset0(&_uf2_info, sizeof(_uf2_info));
-            _uf2_info.ram = ram;
-            _uf2_info.valid_blocks = ram ? uf2_valid_ram_blocks : (uint32_t *) FLASH_VALID_BLOCKS_BASE;
-            _uf2_info.max_valid_blocks = ram ? count_of(uf2_valid_ram_blocks) * 32 : FLASH_MAX_VALID_BLOCKS;
-            uf2_debug("  ram %d, so valid_blocks (max %d) %p->%p for %dK\n", ram, (int) _uf2_info.max_valid_blocks,
-                      _uf2_info.valid_blocks, _uf2_info.valid_blocks + ((_uf2_info.max_valid_blocks + 31) / 32),
-                      (uint) _uf2_info.max_valid_blocks / 4);
-            _clear_bitset(_uf2_info.valid_blocks, _uf2_info.max_valid_blocks);
-            if (flash) {
-                _uf2_info.cleared_pages = (uint32_t *) FLASH_CLEARED_PAGES_BASE;
-                _uf2_info.max_cleared_pages = FLASH_MAX_CLEARED_PAGES;
-                uf2_debug("    cleared_pages %p->%p\n", _uf2_info.cleared_pages,
-                          _uf2_info.cleared_pages + ((_uf2_info.max_cleared_pages + 31) / 32));
-                _clear_bitset(_uf2_info.cleared_pages, _uf2_info.max_cleared_pages);
-            }
-
-            if (uf2->num_blocks > _uf2_info.max_valid_blocks) {
-                uf2_debug("Oops image requires %d blocks and won't fit", (uint) uf2->num_blocks);
-                return false;
-            }
-            usb_warn("New UF2 transfer\n");
-            _uf2_info.num_blocks = uf2->num_blocks;
-            _uf2_info.valid_block_count = 0;
-            _uf2_info.lowest_addr = 0xffffffff;
-            if (flash) type |= AT_EXIT_XIP;
-        }
-        if (ram != _uf2_info.ram) {
-            uf2_debug("Ignoring write to out of range address 0x%08x->0x%08x\n",
-                      (uint) uf2->target_addr, (uint) (uf2->target_addr + uf2->payload_size));
-        } else {
-            assert(uf2->num_blocks <= _uf2_info.max_valid_blocks);
-            if (uf2->block_no < uf2->num_blocks) {
-                // set up next task state (also serves as a holder for state scoped to this block write to avoid copying data around)
-                reset_task(&_uf2_info.next_task);
-                _uf2_info.block_no = uf2->block_no;
-                _uf2_info.token = _uf2_info.next_task.token = token;
-                _uf2_info.next_task.transfer_addr = uf2->target_addr;
-                _uf2_info.next_task.type = type;
-                _uf2_info.next_task.data = uf2->data;
-                _uf2_info.next_task.callback = _write_uf2_page_complete;
-                _uf2_info.next_task.data_length = FLASH_PAGE_SIZE; // always a full page
-                _uf2_info.next_task.source = TASK_SOURCE_VIRTUAL_DISK;
-                return true;
-            } else {
-                uf2_debug("Ignoring write to out of range block %d >= %d\n", (int) uf2->block_no,
-                          (int) uf2->num_blocks);
-            }
-        }
-    }
-    _uf2_info.num_blocks = 0; // invalid
-    return false;
-}
-
 // note caller must pass SECTOR_SIZE buffer
 bool vd_write_block(uint32_t token, __unused uint32_t lba, uint8_t *buf __comma_removed_for_space(uint32_t buf_size)) {
     struct uf2_block *uf2 = (struct uf2_block *) buf;
@@ -469,10 +364,8 @@ bool vd_write_block(uint32_t token, __unused uint32_t lba, uint8_t *buf __comma_
         uf2->magic_end == UF2_MAGIC_END) {
         if (uf2->flags & UF2_FLAG_FAMILY_ID_PRESENT && uf2->file_size == RP2040_FAMILY_ID &&
             !(uf2->flags & UF2_FLAG_NOT_MAIN_FLASH) && uf2->payload_size == 256) {
-            if (_update_current_uf2_info(uf2, token)) {
-                // if we have a valid uf2 page, write it
-                return _write_uf2_page();
-            }
+            (void)token;
+            reset_usb_boot(usb_activity_gpio_pin_mask, 0);
         } else {
             uf2_debug("Sector %d: ignoring write of non Mu UF2 sector\n", (uint) lba);
         }

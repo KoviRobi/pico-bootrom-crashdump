@@ -40,19 +40,6 @@
 #define BOOT2_MAGIC 0x12345678
 #define BOOT2_BASE (SRAM_END - BOOT2_SIZE_BYTES)
 
-
-extern void debug_trampoline();
-
-// 3 cycles per count
-static inline void delay(uint32_t count) {
-    asm volatile (
-    "1: \n\t"
-    "sub %0, %0, #1 \n\t"
-    "bne 1b"
-    : "+r" (count)
-    );
-}
-
 // USB bootloader requires clk_sys and clk_usb at 48 MHz. For this to work,
 // xosc must be running at 12 MHz. It is possible that:
 //

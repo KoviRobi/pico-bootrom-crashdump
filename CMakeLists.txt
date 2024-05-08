@@ -130,6 +130,7 @@ target_link_libraries(bootrom PRIVATE
         hardware_regs
         hardware_structs
         pico_platform
+        pico_bootrom
         hardware_sync
         boot_uf2_headers
         boot_picoboot_headers

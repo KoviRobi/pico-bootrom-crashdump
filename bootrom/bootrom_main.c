@@ -155,17 +155,6 @@ static __noinline __attribute__((noreturn)) void _usb_boot(uint32_t _usb_activit
     async_task_worker_thunk();
 }
 
-static void __attribute__((noreturn)) _usb_boot_reboot_wrapper() {
-    _usb_boot(watchdog_hw->scratch[0], watchdog_hw->scratch[1]);
-}
-
-void __attribute__((noreturn)) reset_usb_boot(uint32_t _usb_activity_gpio_pin_mask, uint32_t _disable_interface_mask) {
-    watchdog_hw->scratch[0] = _usb_activity_gpio_pin_mask;
-    watchdog_hw->scratch[1] = _disable_interface_mask;
-    watchdog_reboot((uintptr_t) _usb_boot_reboot_wrapper, SRAM_END, 10);
-    while (true) __wfi();
-}
-
 int main() {
     // note this never returns (and is marked as such)
     _usb_boot(0, 0);

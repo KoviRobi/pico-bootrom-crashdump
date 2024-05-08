@@ -13,6 +13,8 @@
 #include "async_task.h"
 #include "generated.h"
 
+#include "pico/bootrom.h"
+
 // Fri, 05 Sep 2008 16:20:51
 #define RASPBERRY_PI_TIME_FRAC 100
 #define RASPBERRY_PI_TIME ((16u << 11u) | (20u << 5u) | (51u >> 1u))
@@ -68,9 +70,6 @@ static_assert(VOLUME_SIZE >= 16 * 1024 * 1024, "volume too small for fat16");
 
 #define MAX_RAM_UF2_BLOCKS 1280
 static_assert(MAX_RAM_UF2_BLOCKS >= ((SRAM_END - SRAM_BASE) + (XIP_SRAM_END - XIP_SRAM_BASE)) / 256, "");
-
-extern __noinline __attribute__((noreturn)) void reset_usb_boot(
-    uint32_t _usb_activity_gpio_pin_mask, uint32_t disable_interface_mask);
 
 static __attribute__((aligned(4))) uint32_t uf2_valid_ram_blocks[(MAX_RAM_UF2_BLOCKS + 31) / 32];
 
@@ -190,76 +189,6 @@ static void _write_uf2_page_complete(struct async_task *task) {
 // return true for async
 static bool _write_uf2_page() {
     reset_usb_boot(usb_activity_gpio_pin_mask, 0);
-    // If we need to write a page (i.e. it hasn't been written before, then we queue a task to do that asynchronously
-    //
-    // Note that in an ideal world, given that we aren't synchronizing with the task in any way from here on,
-    // we'd hand that task an immutable work item so that we don't step on the task's toes later.
-    //
-    // In the constrained bootrom (no RAM use) environment we don't have space to do that, so instead we pass
-    // it a work item which is immutable except for the data buffer to be written.
-    //
-    // Note that we also pre-update all _uf2_info state in anticipation of the write being completed. This saves us
-    // doing some extra figuring in _write_uf2_page_complete later, and there are only two cases we care about
-    //
-    // 1) that the task fails, in which case we'll notice in _write_uf2_page_complete anyway, and we can reset.
-    // 2) that we superseded what the task was doing with a new UF2 download, in which case the old state is irrelevant.
-    //
-    // So basically the rule is, that this method (and _write_uf2_page_complete) which are both called under our
-    // pseudo-lock (i.e. during IRQ or with IRQs disabled) are the onlu things that touch UF2 tracking state...
-    // the task just takes an immutable command (with possibly mutable data), and takes care of writing that data to FLASH or RAM
-    // along with erase etc.
-    usb_debug("_write_uf2_page tok %d block %d / %d\n", (int) _uf2_info.token, _uf2_info.block_no,
-              (int) _uf2_info.info.num_blocks);
-    uint block_offset = _uf2_info.block_no / 32;
-    uint32_t block_mask = 1u << (_uf2_info.block_no & 31u);
-    if (!(_uf2_info.valid_blocks[block_offset] & block_mask)) {
-        // note we don't want to pick XIP_CACHE over RAM even though it has a lower address
-        bool xip_cache_next = _uf2_info.next_task.transfer_addr < SRAM_BASE;
-        bool xip_cache_lowest = _uf2_info.lowest_addr < SRAM_BASE;
-        if ((_uf2_info.next_task.transfer_addr < _uf2_info.lowest_addr && xip_cache_next == xip_cache_lowest) ||
-            (xip_cache_lowest && !xip_cache_next)) {
-            _uf2_info.lowest_addr = _uf2_info.next_task.transfer_addr;
-        }
-        if (_uf2_info.ram) {
-            assert(_uf2_info.next_task.transfer_addr);
-        } else {
-            uint page_no = _uf2_info.block_no * 256 / FLASH_SECTOR_ERASE_SIZE;
-            assert(_uf2_info.cleared_pages);
-            assert(page_no < _uf2_info.max_cleared_pages);
-            uint page_offset = page_no / 32;
-            uint32_t page_mask = 1u << (page_no & 31u);
-            assert(page_offset <= _uf2_info.max_cleared_pages);
-            if (!(_uf2_info.cleared_pages[page_offset] & page_mask)) {
-                _uf2_info.next_task.erase_addr = _uf2_info.next_task.transfer_addr & ~(FLASH_SECTOR_ERASE_SIZE - 1u);
-                _uf2_info.next_task.erase_size = FLASH_SECTOR_ERASE_SIZE; // always erase a single sector
-                usb_debug("Setting erase addr %08x\n", (uint) _uf2_info.next_task.erase_addr);
-                _uf2_info.cleared_pages[page_offset] |= page_mask;
-                _uf2_info.next_task.type |= AT_FLASH_ERASE;
-            }
-            usb_debug("Have flash destined page %08x (%08x %08x)\n", (uint) _uf2_info.next_task.transfer_addr,
-                      (uint) *(uint32_t *) _uf2_info.next_task.data,
-                      (uint) *(uint32_t *) (_uf2_info.next_task.data + 4));
-            assert(!(_uf2_info.next_task.transfer_addr & 0xffu));
-        }
-        _uf2_info.valid_block_count++;
-        _uf2_info.valid_blocks[block_offset] |= block_mask;
-        usb_warn("Queuing 0x%08x->0x%08x valid %d/%d checked %d/%d\n", (uint)
-                (uint) _uf2_info.next_task.transfer_addr, (uint) (_uf2_info.next_task.transfer_addr + FLASH_PAGE_SIZE),
-                 (uint) _uf2_info.block_no + 1u, (uint) _uf2_info.num_blocks, (uint) _uf2_info.valid_block_count,
-                 (uint) _uf2_info.num_blocks);
-        queue_task(&virtual_disk_queue, &_uf2_info.next_task, _write_uf2_page_complete);
-        // after the first write (i.e. next time, we want to check the source)
-        _uf2_info.next_task.check_last_mutation_source = true;
-        // note that queue_task may actually be handled sychronously based on #define, however that is OK
-        // because it still calls _write_uf2_page_complete which still calls vd_async_complete which is allowed even in non async.
-        return true;
-    } else {
-        assert(_uf2_info.next_task.type); // we should not have had any valid blocks after reset... we must take the above path so that the task gets executed
-        uf2_debug("Ignore duplicate write to 0x%08x->0x%08x\n",
-                  (uint) _uf2_info.next_task.transfer_addr,
-                  (uint) (_uf2_info.next_task.transfer_addr + FLASH_PAGE_SIZE));
-    }
-    return false; // not async
 }
 
 void vd_init() {

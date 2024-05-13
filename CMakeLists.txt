@@ -35,7 +35,7 @@ set(GIT_INFO_H ${CMAKE_CURRENT_BINARY_DIR}/git_info.h)
 set(GENERATED_H ${CMAKE_CURRENT_BINARY_DIR}/generated.h)
 
 # order matches original makefile
-add_executable(bootrom
+add_library(bootrom
         bootrom/bootrom_rt0.S
         bootrom/bit_functions.S
         bootrom/bootrom_main.c
@@ -48,7 +48,11 @@ add_executable(bootrom
         usb_device_tiny/usb_stream_helper.c
         )
 
-target_include_directories(bootrom PRIVATE bootrom usb_device_tiny ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(bootrom PRIVATE
+        bootrom
+        usb_device_tiny;${CMAKE_CURRENT_BINARY_DIR}
+        "pico_sdk/src/rp2_common/pico_bootrom/include/pico"
+        )
 
 add_custom_target(update_git_info DEPENDS ${GIT_INFO_H})
 
@@ -85,7 +89,6 @@ target_cl_options("-g")
 target_cl_options("-Os")
 target_cl_options("-ffunction-sections")
 target_cl_options("-fdata-sections")
-target_cl_options("-flto")
 
 target_link_options(bootrom PRIVATE "LINKER:--build-id=none")
 target_link_options(bootrom PRIVATE "LINKER:--undefined=isr_irq5")
@@ -125,26 +128,23 @@ target_link_libraries(bootrom PRIVATE
         hardware_resets
         hardware_regs
         hardware_structs
-        hardware_watchdog
-        pico_platform
-        pico_bootrom
+        pico_base_headers
         hardware_sync
         boot_uf2_headers
         boot_picoboot_headers
-        bs2_default_library
         )
 
-function(pico_add_h32_output TARGET)
-    find_package (Python3 REQUIRED COMPONENTS Interpreter)
-    add_custom_command(TARGET ${TARGET} POST_BUILD
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/bin2hex -32 ${TARGET}.bin ${TARGET}.h32)
-endfunction()
-
-pico_add_bin_output(bootrom)
-pico_add_dis_output(bootrom)
-pico_add_map_output(bootrom)
-pico_add_hex_output(bootrom)
-pico_add_h32_output(bootrom)
+add_custom_command(OUTPUT bootrom.o
+        DEPENDS bootrom
+        COMMAND ${CMAKE_LINKER}
+        --relocatable
+        -flto
+        -T ${CMAKE_CURRENT_SOURCE_DIR}/bootrom/bootrom.ld
+        --gc-sections
+        -e _entry_point
+        $<TARGET_FILE:bootrom> -o bootrom.o
+        )
+add_custom_target(bootrom_o ALL DEPENDS bootrom.o)
 
 if (INCLUDE_TESTS)
     add_subdirectory(test)

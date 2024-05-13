@@ -133,6 +133,3 @@ bool usb_stream_noop_on_chunk(uint32_t size __comma_removed_for_space(__unused s
     return false;
 }
 #endif
-
-
-

@@ -13,7 +13,8 @@
 #include "async_task.h"
 #include "generated.h"
 
-#include "pico/bootrom.h"
+#include "bootrom.h"
+
 
 // Fri, 05 Sep 2008 16:20:51
 #define RASPBERRY_PI_TIME_FRAC 100

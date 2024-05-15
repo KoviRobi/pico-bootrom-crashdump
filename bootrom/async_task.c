@@ -18,117 +18,14 @@
 
 CU_REGISTER_DEBUG_PINS(flash)
 
-static uint32_t _do_flash_enter_cmd_xip();
-static uint32_t _do_flash_exit_xip();
-static uint32_t _do_flash_erase_sector(uint32_t addr);
-static uint32_t _do_flash_erase_range(uint32_t addr, uint32_t len);
-static uint32_t _do_flash_page_program(uint32_t addr, uint8_t *data);
-static uint32_t _do_flash_page_read(uint32_t addr, uint8_t *data);
-static bool _is_address_safe_for_vectoring(uint32_t addr);
-
-// keep table of flash function pointers in case RPI user wants to redirect them
-static const struct flash_funcs {
-    uint32_t size;
-    uint32_t (*do_flash_enter_cmd_xip)();
-    uint32_t (*do_flash_exit_xip)();
-    uint32_t (*do_flash_erase_sector)();
-    uint32_t (*do_flash_erase_range)(uint32_t addr, uint32_t size);
-    uint32_t (*do_flash_page_program)(uint32_t addr, uint8_t *data);
-    uint32_t (*do_flash_page_read)(uint32_t addr, uint8_t *data);
-} default_flash_funcs = {
-        .size = sizeof(struct flash_funcs),
-        _do_flash_enter_cmd_xip,
-        _do_flash_exit_xip,
-        _do_flash_erase_sector,
-        _do_flash_erase_range,
-        _do_flash_page_program,
-        _do_flash_page_read,
-};
-
-const struct flash_funcs *flash_funcs;
-
-static uint32_t _do_flash_enter_cmd_xip() {
-    usb_warn("flash ennter cmd XIP\n");
-    flash_enter_cmd_xip();
-    return 0;
-}
-
-static uint32_t _do_flash_exit_xip() {
-    usb_warn("flash exit XIP\n");
-    DEBUG_PINS_SET(flash, 2);
-    connect_internal_flash();
-    DEBUG_PINS_SET(flash, 4);
-    flash_exit_xip();
-    DEBUG_PINS_CLR(flash, 6);
-#ifdef USE_BOOTROM_GPIO
-    gpio_setup();
-#endif
-    return 0;
-}
-
-static uint32_t _do_flash_erase_sector(uint32_t addr) {
-    usb_warn("erasing flash sector @%08x\n", (uint) addr);
-    DEBUG_PINS_SET(flash, 2);
-    flash_sector_erase(addr - XIP_MAIN_BASE);
-    DEBUG_PINS_CLR(flash, 2);
-    return 0;
-}
-
-static uint32_t _do_flash_erase_range(uint32_t addr, uint32_t len) {
-    uint32_t end = addr + len;
-    uint32_t ret = PICOBOOT_OK;
-    while (addr < end && !ret) {
-        ret = flash_funcs->do_flash_erase_sector(addr);
-        addr += FLASH_SECTOR_ERASE_SIZE;
-    }
-    return ret;
-}
-
-static uint32_t _do_flash_page_program(uint32_t addr, uint8_t *data) {
-    usb_warn("writing flash page @%08x\n", (uint) addr);
-    DEBUG_PINS_SET(flash, 4);
-    flash_page_program(addr - XIP_MAIN_BASE, data);
-    DEBUG_PINS_CLR(flash, 4);
-    // todo set error result
-    return 0;
-}
-
-static uint32_t _do_flash_page_read(uint32_t addr, uint8_t *data) {
-    DEBUG_PINS_SET(flash, 4);
-    usb_warn("reading flash page @%08x\n", (uint) addr);
-    flash_read_data(addr - XIP_MAIN_BASE, data, FLASH_PAGE_SIZE);
-    DEBUG_PINS_CLR(flash, 4);
-    // todo set error result
-    return 0;
-}
-
-static bool _is_address_safe_for_vectoring(uint32_t addr) {
-    // not we are inclusive at end to save arithmentic, and since we always checking for non empty ranges
-    return is_address_ram(addr) &&
-           (addr < FLASH_VALID_BLOCKS_BASE || addr > FLASH_VALID_BLOCKS_BASE + FLASH_BITMAPS_SIZE);
-}
-
 static uint8_t _last_mutation_source;
 
 // NOTE for simplicity this returns error codes from PICOBOOT
 static uint32_t _execute_task(struct async_task *task) {
-    uint32_t ret;
     if (watchdog_rebooting()) {
         return PICOBOOT_REBOOTING;
     }
     uint type = task->type;
-    if (type & AT_VECTORIZE_FLASH) {
-        if (task->transfer_addr & 1u) {
-            return PICOBOOT_BAD_ALIGNMENT;
-        }
-        if (_is_address_safe_for_vectoring(task->transfer_addr) &&
-            _is_address_safe_for_vectoring(task->transfer_addr + sizeof(struct flash_funcs))) {
-            memcpy((void *) task->transfer_addr, &default_flash_funcs, sizeof(struct flash_funcs));
-            flash_funcs = (struct flash_funcs *) task->transfer_addr;
-        } else {
-            return PICOBOOT_INVALID_ADDRESS;
-        }
-    }
     if (type & AT_EXCLUSIVE) {
         // we do this in executex task, so we know we aren't executing and virtual_disk_queue tasks at this moment
         usb_warn("SET EXCLUSIVE ACCESS %d\n", task->exclusive_param);
@@ -136,10 +33,6 @@ static uint32_t _execute_task(struct async_task *task) {
         if (task->exclusive_param == EXCLUSIVE_AND_EJECT) {
             msc_eject();
         }
-    }
-    if (type & AT_EXIT_XIP) {
-        ret = flash_funcs->do_flash_exit_xip();
-        if (ret) return ret;
     }
     if (type & AT_EXEC) {
         usb_warn("exec %08x\n", (uint) task->transfer_addr);
@@ -152,17 +45,6 @@ static uint32_t _execute_task(struct async_task *task) {
         }
         _last_mutation_source = task->source;
     }
-    if (type & AT_FLASH_ERASE) {
-        usb_warn("request flash erase at %08x+%08x\n", (uint) task->erase_addr, (uint) task->erase_size);
-        // todo maybe remove to save space
-        if (task->erase_addr & (FLASH_SECTOR_ERASE_SIZE - 1)) return PICOBOOT_BAD_ALIGNMENT;
-        if (task->erase_size & (FLASH_SECTOR_ERASE_SIZE - 1)) return PICOBOOT_BAD_ALIGNMENT;
-        if (!(is_address_flash(task->erase_addr) && is_address_flash(task->erase_addr + task->erase_size))) {
-            return PICOBOOT_INVALID_ADDRESS;
-        }
-        ret = flash_funcs->do_flash_erase_range(task->erase_addr, task->erase_size);
-        if (ret) return ret;
-    }
     bool direct_access = false;
     if (type & (AT_WRITE | AT_READ)) {
         if ((is_address_ram(task->transfer_addr) && is_address_ram(task->transfer_addr + task->data_length))
@@ -172,10 +54,6 @@ static uint32_t _execute_task(struct async_task *task) {
 #endif
                 ) {
             direct_access = true;
-        } else if ((is_address_flash(task->transfer_addr) &&
-                    is_address_flash(task->transfer_addr + task->data_length))) {
-            // flash
-            if (task->transfer_addr & (FLASH_PAGE_SIZE - 1)) return PICOBOOT_BAD_ALIGNMENT;
         } else {
             // bad address
             return PICOBOOT_INVALID_ADDRESS;
@@ -183,32 +61,14 @@ static uint32_t _execute_task(struct async_task *task) {
         if (type & AT_WRITE) {
             if (direct_access) {
                 usb_warn("writing %08x +%04x\n", (uint) task->transfer_addr, (uint) task->data_length);
-                uint32_t ff = (uintptr_t) flash_funcs;
-                if (MAX(ff, task->transfer_addr) <
-                    MIN(ff + sizeof(struct flash_funcs), task->transfer_addr + task->data_length)) {
-                    usb_warn("RAM write overlaps vectors, reverting them to ROM\n");
-                    flash_funcs = &default_flash_funcs;
-                }
                 memcpy((void *) task->transfer_addr, task->data, task->data_length);
-            } else {
-                assert(task->data_length <= FLASH_PAGE_SIZE);
-                ret = flash_funcs->do_flash_page_program(task->transfer_addr, task->data);
-                if (ret) return ret;
             }
         }
         if (type & AT_READ) {
             if (direct_access) {
                 usb_warn("reading %08x +%04x\n", (uint) task->transfer_addr, (uint) task->data_length);
                 memcpy(task->data, (void *) task->transfer_addr, task->data_length);
-            } else {
-                assert(task->data_length <= FLASH_PAGE_SIZE);
-                ret = flash_funcs->do_flash_page_read(task->transfer_addr, task->data);
-                if (ret) return ret;
             }
-        }
-        if (type & AT_ENTER_CMD_XIP) {
-            ret = flash_funcs->do_flash_enter_cmd_xip();
-            if (ret) return ret;
         }
     }
     return PICOBOOT_OK;
@@ -287,7 +147,6 @@ static bool _worker_started;
 static struct async_task _worker_task;
 
 void __attribute__((noreturn)) async_task_worker() {
-    flash_funcs = &default_flash_funcs;
 #ifndef NDEBUG
     _worker_started = true;
 #endif

@@ -64,7 +64,7 @@ extern void *__memcpy(void *dest, const void *src, uint n);
 static inline void memset0(void *dest, uint count) { memset(dest, 0, count); }
 void interrupt_enable(uint int_num, bool enable);
 void watchdog_reboot(uint32_t pc, uint32_t sp, uint32_t delay_ms);
-extern bool watchdog_rebooting();
+extern bool watchdog_rebooting;
 
 #ifdef USE_BOOTROM_GPIO
 extern void gpio_setup();

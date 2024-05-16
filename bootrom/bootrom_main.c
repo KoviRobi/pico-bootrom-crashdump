@@ -39,6 +39,75 @@
 #define BOOT2_MAGIC 0x12345678
 #define BOOT2_BASE (SRAM_END - BOOT2_SIZE_BYTES)
 
+uint32_t usb_activity_gpio_pin_mask;
+
+#include "hardware/regs/m0plus.h"
+#include "hardware/structs/clocks.h"
+#include "hardware/structs/psm.h"
+#include "hardware/structs/sio.h"
+#include "hardware/structs/watchdog.h"
+#include "hardware/resets.h"
+#include "hardware/regs/pads_bank0.h"
+#include "hardware/structs/iobank0.h"
+
+static inline io_rw_32 *GPIO_CTRL_REG(uint x) {
+    uint32_t offset = 0;
+
+    // removed since we know it is in range
+//    if (x >=  0 && x < 32)
+    offset = IO_BANK0_BASE + (x * 8) + 4;
+
+    return (io_rw_32 *) offset;
+}
+
+static inline io_rw_32 *PAD_CTRL_REG(uint x) {
+    uint32_t offset = 0;
+
+    // removed since we know it is in range
+//    if (x >=  0 && x < 32)
+    offset = PADS_BANK0_BASE + PADS_BANK0_GPIO0_OFFSET + (x * 4);
+
+    return (io_rw_32 *) offset;
+}
+
+void gpio_funcsel(uint i, int fn) {
+    io_rw_32 *pad_ctl = PAD_CTRL_REG(i);
+    // we are only enabling output, so just clear the OD
+    hw_clear_bits(pad_ctl, PADS_BANK0_GPIO0_OD_BITS);
+    // Set the funcsel
+    *GPIO_CTRL_REG(i) = (fn << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB);
+}
+
+
+void gpio_setup() {
+    if (usb_activity_gpio_pin_mask) {
+        unreset_block(RESETS_RESET_IO_BANK0_BITS);
+        sio_hw->gpio_set = usb_activity_gpio_pin_mask;
+        sio_hw->gpio_oe_set = usb_activity_gpio_pin_mask;
+        // need pin number rather than mask
+        gpio_funcsel(ctz32(usb_activity_gpio_pin_mask), 5);
+    }
+#ifndef NDEBUG
+    // Set to RIO for debug
+    for (int i = 19; i < 23; i++) {
+        gpio_init(i);
+        gpio_dir_out_mask(1 << i);
+    }
+#endif
+}
+
+void interrupt_enable(uint irq, bool enable) {
+    assert(irq < N_IRQS);
+    if (enable) {
+        // Clear pending before enable
+        // (if IRQ is actually asserted, it will immediately re-pend)
+        *(volatile uint32_t *) (PPB_BASE + M0PLUS_NVIC_ICPR_OFFSET) = 1u << irq;
+        *(volatile uint32_t *) (PPB_BASE + M0PLUS_NVIC_ISER_OFFSET) = 1u << irq;
+    } else {
+        *(volatile uint32_t *) (PPB_BASE + M0PLUS_NVIC_ICER_OFFSET) = 1u << irq;
+    }
+}
+
 // USB bootloader requires clk_sys and clk_usb at 48 MHz. For this to work,
 // xosc must be running at 12 MHz. It is possible that:
 //
@@ -125,8 +194,7 @@ void __noinline __attribute__((noreturn)) async_task_worker_thunk();
 static __noinline __attribute__((noreturn)) void _usb_boot(uint32_t _usb_activity_gpio_pin_mask,
                                                                   uint32_t disable_interface_mask) {
     reset_block_noinline(RESETS_RESET_USBCTRL_BITS);
-    if (!running_on_fpga())
-        _usb_clock_setup();
+    _usb_clock_setup();
     unreset_block_wait_noinline(RESETS_RESET_USBCTRL_BITS);
 
     // Ensure timer and watchdog are running at approximately correct speed

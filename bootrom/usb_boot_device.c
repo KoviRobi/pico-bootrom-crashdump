@@ -326,6 +326,7 @@ static void _picoboot_cmd_packet_internal(struct usb_endpoint *ep) {
                     type = cmd_mapping[id + 2];
                 }
                 if (cmd->bCmdId == PC_REBOOT) {
+                    watchdog_rebooting = true;
                     safe_reboot(cmd->reboot_cmd.dPC, cmd->reboot_cmd.dSP, cmd->reboot_cmd.dDelayMS);
                     return _picoboot_ack();
                 }

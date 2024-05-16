@@ -19,9 +19,11 @@ CU_REGISTER_DEBUG_PINS(flash)
 
 static uint8_t _last_mutation_source;
 
+bool watchdog_rebooting = false;
+
 // NOTE for simplicity this returns error codes from PICOBOOT
 static uint32_t _execute_task(struct async_task *task) {
-    if (watchdog_rebooting()) {
+    if (watchdog_rebooting) {
         return PICOBOOT_REBOOTING;
     }
     uint type = task->type;

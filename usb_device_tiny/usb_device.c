@@ -1065,7 +1065,7 @@ static void _usb_handle_buffer() {
     }
 }
 
-void __isr __used isr_usbctrl(void) {
+void __isr __used __crash__isr_irq5(void) {
     uint32_t status = usb_hw->ints;
     DEBUG_PINS_SET(usb_irq, 1);
 

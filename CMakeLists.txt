@@ -91,7 +91,7 @@ target_cl_options("-ffunction-sections")
 target_cl_options("-fdata-sections")
 
 target_link_options(bootrom PRIVATE "LINKER:--build-id=none")
-target_link_options(bootrom PRIVATE "LINKER:--undefined=isr_irq5")
+target_link_options(bootrom PRIVATE "LINKER:--undefined=__crash__isr_irq5")
 target_link_options(bootrom PRIVATE "LINKER:--gc-sections")
 #target_link_options(bootrom PRIVATE "--save-temps")
 target_link_options(bootrom PRIVATE "--specs=nosys.specs")
@@ -141,7 +141,7 @@ add_custom_command(OUTPUT bootrom.o
         -flto
         -T ${CMAKE_CURRENT_SOURCE_DIR}/bootrom/bootrom.ld
         --gc-sections
-        -e _entry_point
+        -e __crash___entry_point
         $<TARGET_FILE:bootrom> -o bootrom.o
         )
 add_custom_target(bootrom_o ALL DEPENDS bootrom.o)

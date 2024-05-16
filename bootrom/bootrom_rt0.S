@@ -39,19 +39,19 @@
 // note if we are NO_FLASH then start: below is currently identical anyway, so save 4 bytes
 #if !PICO_NO_FLASH
     // We simply install our own vector table and redirect through it
-    ldr r0, =__vectors
+    ldr r0, =__crash____vectors
     b __vector_entry
 #endif
 
 // ELF entry point generally called when we load an ELF via debugger
-.type _entry_point,%function
+.type __crash___entry_point,%function
 .thumb_func
-.global _entry_point
-_entry_point:
+.global __crash___entry_point
+__crash___entry_point:
 
 #if PICO_NO_FLASH
     // non flash
-    ldr r0, =__vectors
+    ldr r0, =__crash____vectors
 #else
     // todo clear watchdog?
     // When using flash, we install and use the ROM vector table to go thru regular bootrom/stage2 flash sequence
@@ -69,19 +69,19 @@ __vector_entry:
 .section .vectors
 .balign 2
 
-.global __vectors
-__vectors:
-.word _stacktop // MSP
-.word _start    // Reset
-.word _nmi      // NMI
-.word _dead     // HardFault
+.global __crash____vectors
+__crash____vectors:
+.word __crash___stacktop // MSP
+.word __crash___start    // Reset
+.word __crash___nmi      // NMI
+.word __crash___dead     // HardFault
 
-.global _dead
-.type _dead,%function
+.global __crash___dead
+.type __crash___dead,%function
 .thumb_func
-_dead: // in place of irq4 vector
+__crash___dead: // in place of irq4 vector
     wfi
-    b _dead
+    b __crash___dead
 
 // this is all a bit cheeky, but the existing code assumed that the table above could go there because nothing ever called
 // some code in irq0 -4 slots
@@ -91,16 +91,16 @@ _dead: // in place of irq4 vector
 // IRQ was asserted. This is probably not intentional, and is confusing
 // to debug, so we should just clear the NMI masks.
 .align 2
-.global _nmi
-.type _nmi,%function
+.global __crash___nmi
+.type __crash___nmi,%function
 .thumb_func
-_nmi:
+__crash___nmi:
     // we do not want to use any stack as we're called from the core 0 boot path.
     // we use r12 as this is saved/restored by the processor in an actual NMI
     mov r12, lr
     // We can take an NMI straight out of reset, so we should first ensure
     // that SYSCFG is being clocked, else we end up straight back in NMI
-    bl enable_clocks
+    bl __crash__enable_clocks
     // Then just clear the NMI mask (for both cores)
     ldr r0, =(SYSCFG_BASE + SYSCFG_PROC0_NMI_MASK_OFFSET)
     mov r1, #0
@@ -117,10 +117,10 @@ _nmi:
 // Assume that enough clocks are already enabled to run this code!
 // Note it is NOT recommended to disable things like ROM clock if WDSEL is
 // later than CLOCKS_BANK_DEFAULT.
-.global enable_clocks
-.type enable_clocks,%function
+.global __crash__enable_clocks
+.type __crash__enable_clocks,%function
 .thumb_func
-enable_clocks:
+__crash__enable_clocks:
     ldr r0, =(CLOCKS_BASE + CLOCKS_WAKE_EN0_OFFSET)
     // Set entire clock enable mask. Relying on HCGs to avoid huge current transient
     mov r1, #0
@@ -128,10 +128,10 @@ enable_clocks:
     str r1, [r0]
     str r1, [r0, #4]
     // we steal the return for its own function
-.global _noop
-.type _noop,%function
+.global __crash___noop
+.type __crash___noop,%function
 .thumb_func
-_noop:
+__crash___noop:
     bx lr
 
 .align 2
@@ -140,9 +140,9 @@ software_git_revision:
 .word GIT_REV
 
 .org 0x54
-.global __irq5_vector
-__irq5_vector:
-.word isr_irq5
+.global __crash____irq5_vector
+__crash____irq5_vector:
+.word __crash__isr_irq5
 
 copyright:
 .string "(C) 2020 Raspberry Pi Trading Ltd"
@@ -151,10 +151,10 @@ copyright:
 // Entry point for both cores
 // ----------------------------------------------------------------------------
 
-.global _start
-.type _start,%function
+.global __crash___start
+.type __crash___start,%function
 .thumb_func
-_start:
+__crash___start:
 
     // Set memory to a known value -- at this point we aren't using any stack
     ldr r0, =0x0000CDAB // abcd0000 as LE bytes
@@ -174,7 +174,7 @@ _start:
 // but the clock setup may be dirty on a warm boot.
 
 // note that the NMI handler does exactly what we want (enable_clocks) and also disables NMI
-    bl _nmi
+    bl __crash___nmi
 
 disable_adc_ie:
 #if RESETS_RESET_PADS_BANK0_BITS != (0x80 << 1)
@@ -192,7 +192,7 @@ disable_adc_ie:
     str r2, [r1, #PADS_BANK0_GPIO29_OFFSET]
 
     // main does not return
-    bl main
+    bl __crash__main
     // b _dead
 
 .global reset_block_noinline

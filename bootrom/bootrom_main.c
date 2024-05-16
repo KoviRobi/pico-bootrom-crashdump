@@ -222,7 +222,7 @@ static __noinline __attribute__((noreturn)) void _usb_boot(uint32_t _usb_activit
     async_task_worker_thunk();
 }
 
-int main() {
+int __crash__main() {
     // note this never returns (and is marked as such)
     _usb_boot(0, 0);
 }

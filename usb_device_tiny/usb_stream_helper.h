@@ -41,8 +41,8 @@ void usb_stream_setup_transfer(struct usb_stream_transfer *transfer, const struc
 void usb_stream_chunk_done(struct usb_stream_transfer *transfer);
 
 #ifndef USB_BOOT_EXPANDED_RUNTIME
-extern void _noop();
-#define usb_stream_noop_on_packet_complete ((stream_on_packet_complete_function)_noop)
+extern void __crash___noop();
+#define usb_stream_noop_on_packet_complete ((stream_on_packet_complete_function)__crash___noop)
 #define usb_stream_noop_on_chunk needs_work
 #else
 void usb_stream_noop_on_packet_complete(__removed_for_space(struct usb_stream_transfer *transfer));

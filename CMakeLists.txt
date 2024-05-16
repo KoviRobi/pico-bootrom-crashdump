@@ -88,8 +88,6 @@ target_cl_options("-Os")
 target_cl_options("-ffunction-sections")
 target_cl_options("-fdata-sections")
 target_cl_options("-flto")
-target_cl_options("-nostdlib")
-target_cl_options("-nodefaultlibs")
 
 target_link_options(bootrom PRIVATE "LINKER:--build-id=none")
 target_link_options(bootrom PRIVATE "LINKER:--undefined=isr_irq5")

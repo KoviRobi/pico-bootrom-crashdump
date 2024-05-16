@@ -12,6 +12,8 @@
 #include "hardware/structs/sio.h"
 #include "hardware/structs/timer.h"
 
+#include <string.h>
+
 #ifdef USE_PICOBOOT
 // allow usb_boot to not include all interfaces
 #define USB_BOOT_WITH_SUBSET_OF_INTERFACES
@@ -59,7 +61,7 @@ typedef unsigned int uint;
 extern void *__memcpy(void *dest, const void *src, uint n);
 // Rom version
 #define memcpy __memcpy
-extern void memset0(void *dest, uint count);
+static inline void memset0(void *dest, uint count) { memset(dest, 0, count); }
 void interrupt_enable(uint int_num, bool enable);
 void watchdog_reboot(uint32_t pc, uint32_t sp, uint32_t delay_ms);
 extern bool watchdog_rebooting();

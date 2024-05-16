@@ -41,11 +41,6 @@ asm (
 );
 #endif
 
-void memset0(void *dest, uint n) {
-    extern void __memset(void *dest, int c, uint n);
-    __memset(dest, 0, n);
-}
-
 volatile bool rebooting;
 
 // note this is always false in USB_BOOT_EXPANDED_RUNTIME but that is ok

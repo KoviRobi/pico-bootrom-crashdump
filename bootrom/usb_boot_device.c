@@ -8,7 +8,6 @@
 #include "runtime.h"
 #include "usb_device.h"
 #include "async_task.h"
-#include "program_flash_generic.h"
 #include "usb_boot_device.h"
 #include "usb_msc.h"
 #include "usb_stream_helper.h"
@@ -185,10 +184,6 @@ static void _picoboot_reset() {
     usb_debug("PICOBOOT RESET\n");
     usb_soft_reset_endpoint(&picoboot_out);
     usb_soft_reset_endpoint(&picoboot_in);
-    if (_picoboot_current_cmd_status.bInProgress) {
-        printf("command in progress so aborting flash\n");
-        flash_abort();
-    }
     memset0(&_picoboot_current_cmd_status, sizeof(_picoboot_current_cmd_status));
     // reset queue (note this also clears exclusive access)
     reset_queue(&virtual_disk_queue);
@@ -205,7 +200,6 @@ static void _tf_picoboot_wait_command(__unused struct usb_endpoint *ep, __unused
 
 static void _picoboot_ack() {
     static struct usb_transfer _ack_transfer;
-    _picoboot_current_cmd_status.bInProgress = false;
     usb_start_empty_transfer((_picoboot_current_cmd_status.bCmdId & 0x80u) ? &picoboot_out : &picoboot_in, &_ack_transfer,
                              _tf_picoboot_wait_command);
 }
@@ -259,7 +253,6 @@ static void _atc_chunk_task_done(struct async_task *task) {
         _set_cmd_status(task->result);
         if (task->result) {
             usb_halt_endpoint(_picoboot_stream_transfer.stream.ep);
-            _picoboot_current_cmd_status.bInProgress = false;
         }
         // we update the position of the original task which will be submitted again in on_stream_chunk
         _picoboot_stream_transfer.task.transfer_addr += task->data_length;
@@ -291,7 +284,6 @@ static void _picoboot_cmd_packet_internal(struct usb_endpoint *ep) {
         _picoboot_stream_transfer.task.picoboot_user_token = cmd->dToken;
         _picoboot_current_cmd_status.bCmdId = cmd->bCmdId;
         _picoboot_current_cmd_status.dToken = cmd->dToken;
-        _picoboot_current_cmd_status.bInProgress = false;
         _set_cmd_status(PICOBOOT_UNKNOWN_CMD);
         _picoboot_stream_transfer.task.transfer_addr = _picoboot_stream_transfer.task.erase_addr = cmd->range_cmd.dAddr;
         _picoboot_stream_transfer.task.erase_size = cmd->range_cmd.dSize;
@@ -340,7 +332,6 @@ static void _picoboot_cmd_packet_internal(struct usb_endpoint *ep) {
                 if (type) {
                     _picoboot_stream_transfer.task.type = type;
                     _picoboot_stream_transfer.task.source = TASK_SOURCE_PICOBOOT;
-                    _picoboot_current_cmd_status.bInProgress = true;
                     if (cmd->dTransferLength) {
                         static uint8_t _buffer[FLASH_PAGE_SIZE];
                         static const struct usb_stream_transfer_funcs _picoboot_stream_funcs = {

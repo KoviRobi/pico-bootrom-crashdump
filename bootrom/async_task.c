@@ -6,7 +6,6 @@
 
 #include <sys/param.h>
 #include "runtime.h"
-#include "program_flash_generic.h"
 #include "async_task.h"
 #include "usb_boot_device.h"
 #include "usb_msc.h"

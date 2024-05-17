@@ -40,7 +40,6 @@ add_executable(bootrom
         bootrom/bit_functions.S
         bootrom/bootrom_main.c
         bootrom/bootrom_misc.S
-        bootrom/program_flash_generic.c
         bootrom/usb_boot_device.c
         bootrom/virtual_disk.c
         bootrom/async_task.c

@@ -50,7 +50,7 @@ __vector_entry:
 
 .thumb
 .section .vectors
-.balign 2
+.balign 256
 
 .global __crash____vectors
 __crash____vectors:

@@ -7,11 +7,7 @@ MEMORY {
 
 SECTIONS {
     .text : {
-        __crash____reset_start = .;
-        KEEP (*(.reset))
-        . = ALIGN(256);
-        __crash____reset_end = .;
-        ASSERT(__crash____reset_end - __crash____reset_start == 256, "ERROR: __crash__ reset section should only be 256 bytes");
+        KEEP(*(.reset))
         KEEP(*(.vectors))
         *(.text*)
         KEEP(*(.rodata.keep*))

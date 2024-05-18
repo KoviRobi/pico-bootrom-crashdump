@@ -139,19 +139,6 @@ copyright:
 .thumb_func
 __crash___start:
 
-    // Set memory to a known value -- at this point we aren't using any stack
-    ldr r0, =0x0000CDAB // abcd0000 as LE bytes
-    ldr r1, =SRAM_BASE
-    ldr r2, =SRAM_END
-    ldr r3, =0xFFFF
-1:  and r0, r3
-    lsl r4, r1, #16
-    bic r4, r3
-    orr r0, r4
-    stm r1!, {r0}
-    cmp r1, r2
-    bne 1b
-
 // Make sure all the control registers we are about to access are being clocked.
 // On a cold boot everything will be set up by the power-on state machine,
 // but the clock setup may be dirty on a warm boot.

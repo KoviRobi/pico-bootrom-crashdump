@@ -25,8 +25,4 @@ SECTIONS {
     ASSERT(__crash____irq5_vector == __crash____vectors + 0x40 + 5 * 4, "too much data in middle of vector table")
     ASSERT(SIZEOF(.data) == 0,
         "ERROR: do not use static memory in bootrom! (.data)")
-
-     /* Leave room above the stack for stage 2 load, so that stage 2
-       can image SRAM from its beginning */
-    __crash___stacktop = ORIGIN(SRAM) + LENGTH(SRAM) - 256;
 }

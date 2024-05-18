@@ -52,6 +52,9 @@ __vector_entry:
 .section .vectors
 .balign 256
 
+.set __crash___stacktop, 0x20042000
+.weak __crash___stacktop
+
 .global __crash____vectors
 __crash____vectors:
 .word __crash___stacktop // MSP

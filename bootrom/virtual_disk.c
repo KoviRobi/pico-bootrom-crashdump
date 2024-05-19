@@ -215,6 +215,13 @@ void xxd(uint8_t *const buf, const uint8_t *const mem) {
     }
 }
 
+void file_cpy(uint8_t *dest, size_t file_offset, size_t buf_size)
+{
+    (void)buf_size;
+    assert(buf_size == SECTOR_SIZE);
+    xxd(dest, (uint8_t *)SRAM_BASE + file_offset / XXD_CHARS_PER_BYTE);
+}
+
 // note caller must pass SECTOR_SIZE buffer
 void init_dir_entry(struct dir_entry *entry, const char *fn, uint cluster, uint len) {
     entry->creation_time_frac = RASPBERRY_PI_TIME_FRAC;
@@ -340,10 +347,10 @@ bool vd_read_block(__unused uint32_t token, uint32_t lba, uint8_t *buf __comma_r
                 // This can be in cluster offset 0 (!cluster_offset) and
                 // higher, hence not in the above "if" conditional
                 if (CLUS_CRASH_START <= cluster && cluster <= CLUS_CRASH_LAST) {
-                    xxd(buf,
-                            (uint8_t *)SRAM_BASE
-                            + (cluster - CLUS_CRASH_START) * BYTES_DUMPED_PER_CLUSTER
-                            + cluster_offset * BYTES_DUMPED_PER_SECTOR);
+                    size_t file_offset =
+                        (cluster - CLUS_CRASH_START) * CLUSTER_SIZE
+                        + cluster_offset * SECTOR_SIZE;
+                    file_cpy(buf, file_offset, SECTOR_SIZE);
                 }
             }
         }

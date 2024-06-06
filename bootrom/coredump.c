@@ -2,6 +2,7 @@
 
 #include "coredump.h"
 
+// TODO
 #include <elf.h>
 
 #include <assert.h>
@@ -114,15 +115,27 @@ static void put_program_headers(uint8_t **const buf, const uint8_t *const end, c
     }
 }
 
-static void put_note_seg(uint8_t **const buf, const uint8_t *const end, const size_t offset) {
-    printf("%s(%p, %p, %lu)\n", __func__, *buf, end, offset); // TODO
-    for (size_t idx = offset; idx < NOTE_SIZE - offset; ++idx)
-    {
-        put_u8(buf, end, (uint8_t)idx); // TODO
-    }
+static void put_note_for(
+        uint8_t **buf, const uint8_t *const end, const size_t offset,
+        const uint32_t type, const uint8_t *name, const size_t name_len,
+        const uint8_t *data, const size_t data_len) {
+    assert(offset == 0); // TODO
+    put_u32el(buf, end, name_len);
 }
 
-static void put_mem_seg(uint8_t **const buf, const uint8_t *const end, const size_t offset) {
+static void put_note(uint8_t **const buf, const uint8_t *const end, const size_t offset) {
+    printf("%s(%p, %p, %lu)\n", __func__, *buf, end, offset); // TODO
+    assert(offset == 0); // TODO
+    uint32_t core0_regs[] = {
+    };
+    uint32_t core1_regs[]  = {
+    };
+    put_note_for(buf, end, offset, PRSTATUS, (uint8_t *)core0_regs, sizeof(core0_regs));
+    put_note_for(buf, end, offset, PRSTATUS, (uint8_t *)core1_regs, sizeof(core1_regs));
+    put_note_for(buf, end, offset, GDB_TDESC, (uint8_t *)GDB_TDESC_XML, sizeof(GDB_TDESC_XML));
+}
+
+static void put_mem(uint8_t **const buf, const uint8_t *const end, const size_t offset) {
     printf("%s(%p, %p, %lu)\n", __func__, *buf, end, offset); // TODO
     for (size_t idx = offset; idx < MEM_SIZE - offset; ++idx)
     {
@@ -130,7 +143,7 @@ static void put_mem_seg(uint8_t **const buf, const uint8_t *const end, const siz
     }
 }
 
-static void put_flash_seg(uint8_t **const buf, const uint8_t *const end, const size_t offset) {
+static void put_flash(uint8_t **const buf, const uint8_t *const end, const size_t offset) {
     printf("%s(%p, %p, %lu)\n", __func__, *buf, end, offset); // TODO
     for (size_t idx = offset; idx < FLASH_SIZE - offset; ++idx)
     {
@@ -247,21 +260,21 @@ void get_coredump_chunk(uint8_t *dest, size_t file_offset, size_t buf_size)
     printf("%4d: %s(%p, %lu, %lu)\n", __LINE__, __func__, dest, file_offset, buf_size); // TODO
     if (dest < end && file_offset < NOTE_END)
     {
-        put_note_seg(&dest, end, file_offset - NOTE_OFFSET);
+        put_note(&dest, end, file_offset - NOTE_OFFSET);
         file_offset = NOTE_END;
     }
 
     printf("%4d: %s(%p, %lu, %lu)\n", __LINE__, __func__, dest, file_offset, buf_size); // TODO
     if (dest < end && file_offset < MEM_END)
     {
-        put_mem_seg(&dest, end, file_offset - MEM_OFFSET);
+        put_mem(&dest, end, file_offset - MEM_OFFSET);
         file_offset = MEM_END;
     }
 
     printf("%4d: %s(%p, %lu, %lu)\n", __LINE__, __func__, dest, file_offset, buf_size); // TODO
     if (dest < end && file_offset < FLASH_END)
     {
-        put_flash_seg(&dest, end, file_offset - FLASH_OFFSET);
+        put_flash(&dest, end, file_offset - FLASH_OFFSET);
         file_offset = FLASH_END;
     }
 

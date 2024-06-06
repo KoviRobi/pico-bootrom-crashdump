@@ -66,3 +66,43 @@ size_t get_coredump_size(void);
 #undef FLASH_SYM_END
 #define FLASH_SYM_BASE 0x1234
 #define FLASH_SYM_END  0x1244
+
+#define GDB_TDESC_XML                                                                          \
+    "<?xml version=\"1.0\"?>"                                                                  \
+    "<!DOCTYPE target SYSTEM \"gdb-target.dtd\">"                                              \
+    "<target>"                                                                                 \
+      "<architecture>arm</architecture>"                                                       \
+      "<feature name=\"org.gnu.gdb.arm.m-profile\">"                                           \
+        "<reg name=\"r0\" bitsize=\"32\" type=\"int\" regnum=\"0\" group=\"general\"/>"        \
+        "<reg name=\"r1\" bitsize=\"32\" type=\"int\" regnum=\"1\" group=\"general\"/>"        \
+        "<reg name=\"r2\" bitsize=\"32\" type=\"int\" regnum=\"2\" group=\"general\"/>"        \
+        "<reg name=\"r3\" bitsize=\"32\" type=\"int\" regnum=\"3\" group=\"general\"/>"        \
+        "<reg name=\"r4\" bitsize=\"32\" type=\"int\" regnum=\"4\" group=\"general\"/>"        \
+        "<reg name=\"r5\" bitsize=\"32\" type=\"int\" regnum=\"5\" group=\"general\"/>"        \
+        "<reg name=\"r6\" bitsize=\"32\" type=\"int\" regnum=\"6\" group=\"general\"/>"        \
+        "<reg name=\"r7\" bitsize=\"32\" type=\"int\" regnum=\"7\" group=\"general\"/>"        \
+        "<reg name=\"r8\" bitsize=\"32\" type=\"int\" regnum=\"8\" group=\"general\"/>"        \
+        "<reg name=\"r9\" bitsize=\"32\" type=\"int\" regnum=\"9\" group=\"general\"/>"        \
+        "<reg name=\"r10\" bitsize=\"32\" type=\"int\" regnum=\"10\" group=\"general\"/>"      \
+        "<reg name=\"r11\" bitsize=\"32\" type=\"int\" regnum=\"11\" group=\"general\"/>"      \
+        "<reg name=\"r12\" bitsize=\"32\" type=\"int\" regnum=\"12\" group=\"general\"/>"      \
+        "<reg name=\"sp\" bitsize=\"32\" type=\"data_ptr\" regnum=\"13\" group=\"general\"/>"  \
+        "<reg name=\"lr\" bitsize=\"32\" type=\"int\" regnum=\"14\" group=\"general\"/>"       \
+        "<reg name=\"pc\" bitsize=\"32\" type=\"code_ptr\" regnum=\"15\" group=\"general\"/>"  \
+        "<reg name=\"xPSR\" bitsize=\"32\" type=\"int\" regnum=\"16\" group=\"general\"/>"     \
+      "</feature>"                                                                             \
+      "<feature name=\"org.gnu.gdb.arm.m-system\">"                                            \
+        "<reg name=\"msp\" bitsize=\"32\" type=\"data_ptr\" regnum=\"17\" group=\"system\"/>"  \
+        "<reg name=\"psp\" bitsize=\"32\" type=\"data_ptr\" regnum=\"18\" group=\"system\"/>"  \
+        "<reg name=\"primask\" bitsize=\"1\" type=\"int8\" regnum=\"20\" group=\"system\"/>"   \
+        "<reg name=\"basepri\" bitsize=\"8\" type=\"int8\" regnum=\"21\" group=\"system\"/>"   \
+        "<reg name=\"faultmask\" bitsize=\"1\" type=\"int8\" regnum=\"22\" group=\"system\"/>" \
+        "<reg name=\"control\" bitsize=\"3\" type=\"int8\" regnum=\"23\" group=\"system\"/>"   \
+      "</feature>"                                                                             \
+    "</target>"
+
+#define NT_GDB_TDESC 0xff000000 /* Contains copy of GDB's target description XML. */
+
+#define PRSTATUS  NT_PRSTATUS,  (uint8_t *)"CORE", sizeof("CORE")
+#define PRSTATUS  NT_PRSTATUS,  (uint8_t *)"CORE", sizeof("CORE")
+#define GDB_TDESC NT_GDB_TDESC, (uint8_t *)"GDB", sizeof("GDB")
